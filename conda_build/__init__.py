@@ -8,6 +8,7 @@ from ._version import get_versions
 __version__ = get_versions()['version']
 del get_versions
 
+
 # Sub commands added by conda-build to the conda command
 sub_commands = [
     'build',
@@ -16,8 +17,6 @@ sub_commands = [
     'index',
     'inspect',
     'metapackage',
-    'pipbuild',
     'render'
-    'sign',
     'skeleton',
 ]

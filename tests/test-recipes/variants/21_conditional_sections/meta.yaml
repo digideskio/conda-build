@@ -1,0 +1,15 @@
+package:
+  name: test_variants_used_in_conditional_sections
+  version: 0.0
+
+source:
+  path: .
+
+requirements:
+  build:
+{% if blas_impl == 'mkl' %}
+    - mkl-devel
+{% endif %}
+{% if blas_impl == 'openblas' %}
+    - openblas-devel
+{% endif %}

@@ -68,7 +68,7 @@ source:
    # - fix.patch
 
 build:
-  {noarch_python_comment}noarch_python: True
+  {noarch_python_comment}noarch: generic
   # Useful to leave this on by default, will allow relocating
   # packages that have hard-coded paths in them
   detect_binary_files_with_prefix: true
@@ -96,15 +96,17 @@ about:
   {summary_comment}summary: {summary}
 
 # See
-# http://docs.continuum.io/conda/build.html for
+# https://docs.conda.io/projects/conda-build for
 # more information about meta.yaml
 """
 
 LUAROCKS_BUILD_SH = """\
 #!/bin/bash
 
+set -o errexit -o pipefail
+
 # Make sure luarocks can see all local dependencies
-$PREFIX/bin/luarocks-admin make_manifest --local-tree
+"${{PREFIX}}"/bin/luarocks-admin make_manifest --local-tree
 
 # Install
 # Rocks aren't located in a standard location, although
@@ -112,12 +114,12 @@ $PREFIX/bin/luarocks-admin make_manifest --local-tree
 # NOTE: we're just picking the first rock we find. If there's
 # more than one, specify it manually.
 ROCK=$(find . -name "*.rockspec" | sort -n -r | head -n 1)
-$PREFIX/bin/luarocks install "$ROCK" --local-tree
+"${{PREFIX}}"/bin/luarocks install "${{ROCK}}" --local-tree
 
 # Add more build steps here, if they are necessary.
 
 # See
-# http://docs.continuum.io/conda/build.html
+# https://docs.conda.io/projects/conda-build
 # for a list of environment variables that are set during the build process.
 """
 

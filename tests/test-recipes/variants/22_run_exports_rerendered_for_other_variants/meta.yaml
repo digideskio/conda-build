@@ -1,0 +1,9 @@
+package:
+  name: test_run_exports_rerendered_for_other_variants
+  version: 1.0.0
+
+requirements:
+  host:
+    - openssl
+  build:
+    - {{ compiler('c') }}

@@ -1,0 +1,24 @@
+# Test that our composite run requirements for the parent package are the union of subpackage
+#    requirements
+
+package:
+  name: split_packages_compose_run_requirements_from_subpackages
+  version: 1.0
+
+requirements:
+  run:
+    - {{ pin_subpackage('my_script_subpackage') }}
+    - {{ pin_subpackage('my_script_subpackage_2') }}
+
+outputs:
+  - name: my_script_subpackage
+    requirements:
+      run:
+        - zlib 1.2.11
+  - name: my_script_subpackage_2
+    requirements:
+      run:
+        - jpeg 9b
+
+# tests are in run_test.sh/bat, and they check that the packages above are both installed
+#    Note that run_test.sh/bat should only actually apply as tests for the implicit metapackage

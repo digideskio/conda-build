@@ -1,0 +1,12 @@
+package:
+  name: numpy_matrix
+  version: 1.0
+
+requirements:
+  build:
+    - python  {{ python }}
+    - numpy   {{ numpy }}
+    - nomkl    # [unix]
+  run:
+    - python
+    - numpy

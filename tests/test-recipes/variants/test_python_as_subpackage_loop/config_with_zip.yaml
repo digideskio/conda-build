@@ -1,0 +1,14 @@
+python:
+  - 2.7
+  - 3.5
+  - 3.6
+
+vc:              # [win]
+  - 9            # [win]
+  - 14           # [win]
+  - 14           # [win]
+
+zip_keys:
+  -
+    - python
+    - vc         # [win]

@@ -1,0 +1,90 @@
+{% set name = "xgboost" %}
+{% set version = "0.80" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+build:
+  number: 1
+  skip: true  # [win or linux32]
+
+requirements:
+  build:
+    - make
+
+outputs:
+  - name: libxgboost
+
+  - name: _py-xgboost-mutex
+    version: 2.0
+    build:
+      string: cpu_0
+
+  - name: py-xgboost
+    requirements:
+      host:
+        - {{ pin_subpackage('libxgboost', exact=True) }}
+      run:
+        - {{ pin_subpackage('libxgboost', exact=True) }}
+        - {{ pin_subpackage('_py-xgboost-mutex', exact=True) }}
+
+  - name: py-xgboost-cpu
+    requirements:
+      run:
+        - {{ pin_subpackage('py-xgboost', exact=True) }}
+
+  - name: xgboost
+    requirements:
+      run:
+        - {{ pin_subpackage('py-xgboost', exact=True) }}
+
+  - name: fake_r_{{ r_implementation }}
+    version: {{ r_version }}
+
+  - name: _r-xgboost-mutex
+    version: 2.0
+    build:
+      string: cpu_0
+
+  - name: r-xgboost
+    build:
+      rpaths:
+        - lib/R/lib
+    requirements:
+      host:
+        - {{ pin_subpackage('libxgboost', exact=True) }}
+        - fake_r_{{ r_implementation }}
+      run:
+        - {{ pin_subpackage('libxgboost', exact=True) }}
+        - {{ pin_subpackage('_r-xgboost-mutex', exact=True) }}
+        - fake_r_{{ r_implementation }}
+
+  - name: r-xgboost-cpu
+    requirements:
+      host:
+        - fake_r_{{ r_implementation }}
+      run:
+        - fake_r_{{ r_implementation }}
+        - {{ pin_subpackage('r-xgboost', exact=True) }}
+
+about:
+  home: https://github.com/dmlc/xgboost
+  license: Apache-2.0
+  summary: |
+    Scalable, Portable and Distributed Gradient Boosting (GBDT, GBRT or GBM) Library, for
+    Python, R, Java, Scala, C++ and more. Runs on single machine, Hadoop, Spark, Flink
+    and DataFlow
+  description: |
+    XGBoost is an optimized distributed gradient boosting library designed to be highly efficient,
+    flexible and portable. It implements machine learning algorithms under the Gradient Boosting
+    framework. XGBoost provides a parallel tree boosting (also known as GBDT, GBM) that solve many
+    data science problems in a fast and accurate way. The same code runs on major distributed
+    environment (Hadoop, SGE, MPI) and can solve problems beyond billions of examples.
+  doc_url: https://xgboost.readthedocs.io/
+  dev_url: https://github.com/dmlc/xgboost/
+
+extra:
+  recipe-maintainers:
+    - beckermr
+    - aldanor

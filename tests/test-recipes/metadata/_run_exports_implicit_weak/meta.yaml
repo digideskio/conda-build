@@ -1,0 +1,12 @@
+package:
+  name: test_has_run_exports_implicit_weak
+  version: '1.0'
+
+build:
+  run_exports:
+    - weak_pinned_package 2.0
+
+outputs:
+  - name: test_has_run_exports_implicit_weak
+  - name: weak_pinned_package
+    version: '2.0'

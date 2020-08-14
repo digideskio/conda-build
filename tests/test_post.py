@@ -2,13 +2,12 @@ import os
 import shutil
 import sys
 
-from conda_build.conda_interface import TemporaryDirectory, PY3
 import pytest
 
-from conda_build import post
-from conda_build.utils import on_win
+from conda_build import post, api
+from conda_build.utils import on_win, package_has_file, get_site_packages
 
-from .utils import test_config, testing_workdir, add_mangling
+from .utils import add_mangling, metadata_dir
 
 
 def test_compile_missing_pyc(testing_workdir):
@@ -38,3 +37,44 @@ def test_hardlinks_to_copies(testing_workdir):
 
     assert os.lstat('test1').st_nlink == 1
     assert os.lstat('test2').st_nlink == 1
+
+
+def test_postbuild_files_raise(testing_metadata, testing_workdir):
+    fn = 'buildstr', 'buildnum', 'version'
+    for f in fn:
+        with open(os.path.join(testing_metadata.config.work_dir,
+                               '__conda_{}__.txt'.format(f)), 'w') as fh:
+            fh.write('123')
+        with pytest.raises(ValueError, match=f) as exc:
+            post.get_build_metadata(testing_metadata)
+
+
+@pytest.mark.skipif(on_win, reason="fix_shebang is not executed on win32")
+def test_fix_shebang(testing_config):
+    fname = 'test1'
+    with open(fname, 'w') as f:
+        f.write("\n")
+    os.chmod(fname, 0o000)
+    post.fix_shebang(fname, '.', '/test/python')
+    assert os.stat(fname).st_mode == 33277  # file with permissions 0o775
+
+
+def test_postlink_script_in_output_explicit(testing_config):
+    recipe = os.path.join(metadata_dir, '_post_link_in_output')
+    pkg = api.build(recipe, config=testing_config, notest=True)[0]
+    assert (package_has_file(pkg, 'bin/.out1-post-link.sh') or
+            package_has_file(pkg, 'Scripts/.out1-post-link.bat'))
+
+
+def test_postlink_script_in_output_implicit(testing_config):
+    recipe = os.path.join(metadata_dir, '_post_link_in_output_implicit')
+    pkg = api.build(recipe, config=testing_config, notest=True)[0]
+    assert (package_has_file(pkg, 'bin/.out1-post-link.sh') or
+            package_has_file(pkg, 'Scripts/.out1-post-link.bat'))
+
+
+def test_pypi_installer_metadata(testing_config):
+    recipe = os.path.join(metadata_dir, '_pypi_installer_metadata')
+    pkg = api.build(recipe, config=testing_config, notest=True)[0]
+    expected_installer = '{}/imagesize-1.1.0.dist-info/INSTALLER'.format(get_site_packages('', 3.7))
+    assert 'conda' == (package_has_file(pkg, expected_installer, refresh=True))

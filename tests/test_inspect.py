@@ -1,3 +1,4 @@
+import re
 import sys
 
 import pytest
@@ -12,7 +13,7 @@ def test_inspect_linkages():
             assert 'conda inspect linkages is only implemented in Linux and OS X' in exc
     else:
         out_string = api.inspect_linkages("python")
-        assert 'openssl' in out_string
+        assert 'libncursesw' in out_string
 
 
 def test_inspect_objects():
@@ -22,7 +23,7 @@ def test_inspect_objects():
             assert 'conda inspect objects is only implemented in OS X' in exc
     else:
         out_string = api.inspect_objects("python")
-        assert 'rpath: @loader_path' in out_string
+        assert re.search('rpath:.*@loader_path', out_string)
 
 
 def test_channel_installable():

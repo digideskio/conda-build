@@ -57,9 +57,13 @@ def execute(args):
         parser.print_help()
         sys.exit()
 
-    for package in args.packages:
-        api.skeletonize(package, repo=args.repo, config=config)
+    api.skeletonize(args.packages, args.repo, output_dir=args.output_dir, recursive=args.recursive,
+                    version=args.version, config=config)
 
 
 def main():
     return execute(sys.argv[1:])
+
+
+if __name__ == '__main__':
+    main()

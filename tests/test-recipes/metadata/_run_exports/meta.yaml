@@ -1,0 +1,15 @@
+package:
+  name: test_has_run_exports
+  version: '1.0'
+
+build:
+  run_exports:
+    strong:
+      - strong_pinned_package 1.0
+    weak:
+      - weak_pinned_package 1.0
+
+outputs:
+  - name: test_has_run_exports
+  - name: strong_pinned_package
+  - name: weak_pinned_package

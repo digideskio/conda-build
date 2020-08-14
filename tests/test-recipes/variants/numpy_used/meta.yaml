@@ -1,0 +1,28 @@
+{% set version = "0.13.5" %}
+
+package:
+  name: tifffile
+  version: {{ version }}
+
+build:
+  number: 3
+
+requirements:
+  build:
+    - python {{ python }}
+    - numpy {{ numpy }}
+    - nomkl    # [unix]
+    - setuptools
+
+  run:
+    - python {{ python }}
+    - {{ pin_compatible("numpy", min_pin="x.x", max_pin="x.x") }}
+
+test:
+  imports:
+    - tifffile
+
+about:
+  home: https://github.com/blink1073/tifffile
+  license:  BSD License
+  summary: 'Read and write image data from and to TIFF files.'

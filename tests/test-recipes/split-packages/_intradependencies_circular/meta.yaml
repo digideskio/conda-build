@@ -1,0 +1,24 @@
+# What's supposed to happen here is:
+#   1. a gets rendered.  It has an unresolved run_exports entry for b (just b, without the pin)
+#   2. b gets rendered.  It has an exact reference to a.  This in turn will change b - and the loop goes on.
+#      Conda-build should raise an error about the circular dependency.
+
+package:
+  name: circular_intradependencies
+  version: 1.0
+
+outputs:
+  - name: a
+    build:
+      run_exports:
+        - {{ pin_subpackage('b', exact=True) }}
+    requirements:
+      build:
+        # compiler requirement is to force this package to have a hash
+        - {{ compiler('c') }}
+  - name: b
+    requirements:
+      build:
+        - {{ pin_subpackage('a', exact=True) }}
+        # compiler requirement is to force this package to have a hash
+        - {{ compiler('c') }}

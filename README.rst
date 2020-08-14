@@ -2,22 +2,11 @@
 conda-build
 ===========
 
-.. image:: https://travis-ci.org/conda/conda-build.svg?branch=master
-               :target: https://travis-ci.org/conda/conda-build
+.. image:: https://dev.azure.com/anaconda-conda/conda-build/_apis/build/status/conda.conda-build?branchName=master
+  :target: https://dev.azure.com/anaconda-conda/conda-build/_build/latest?definitionId=1&branchName=master
 
-.. image:: https://ci.appveyor.com/api/projects/status/07r1m8fy55jee9th?svg=true
-               :target: https://ci.appveyor.com/project/ContinuumAnalyticsFOSS/conda-build
-               
-.. image:: https://www.quantifiedcode.com/api/v1/project/1960a96404aa431bab5d834edff1cf85/badge.svg
-  :target: https://www.quantifiedcode.com/app/project/1960a96404aa431bab5d834edff1cf85
-  :alt: Code issues
-  
 .. image:: https://codecov.io/gh/conda/conda-build/branch/master/graph/badge.svg
   :target: https://codecov.io/gh/conda/conda-build
-  
-.. image:: https://landscape.io/github/conda/conda-build/master/landscape.svg?style=flat
-   :target: https://landscape.io/github/conda/conda-build/master
-   :alt: Code Health
 
 
 Installation
@@ -95,8 +84,14 @@ Testing
 -------
 
 Running our test suite requires cloning one other repo at the same level as conda-build:
-https://github.com/conda/conda_build_test_repo - this is necessary for relative path tests
+https://github.com/conda/conda_build_test_recipe - this is necessary for relative path tests
 outside of conda build's build tree.
+
+Additionally, you need to install a few extra packages:
+
+.. code-block:: bash
+
+  conda install anaconda-client pytest pytest-cov mock pytest-mock conda-package-handling python-libarchive-c
 
 The test suite runs with py.test. Some useful commands to run select tests,
 assuming you are in the conda-build root folder:
@@ -105,6 +100,11 @@ Run all tests:
 ==============
 
     py.test tests
+
+Run one test file:
+======================
+
+    py.test tests/test_api_build.py
 
 Run one test function:
 ======================
@@ -115,10 +115,33 @@ Run one parameter of one parametrized test function:
 ====================================================
 
 Several tests are parametrized, to run some small change, or build several
-recipe folders. To choose only one of them:
+recipe folders. To choose only one of them::
 
     py.test tests/test_api_build.py::test_recipe_builds.py[entry_points]
 
 Note that our tests use py.test fixtures extensively. These sometimes trip up IDE
 style checkers about unused or redefined variables. These warnings are safe to
 ignore.
+
+Releasing
+---------
+
+Conda-build releases may be performed via the `rever command <https://regro.github.io/rever-docs/>`_.
+Rever is configured to perform the activities for a typical conda-build release.
+To cut a release, simply run ``rever <X.Y.Z>`` where ``<X.Y.Z>`` is the
+release number that you want bump to. For example, ``rever 1.2.3``.  However,
+it is always good idea to make sure that the you have permissions everywhere
+to actually perform the release.  So it is customary to run ``rever check`` before
+the release, just to make sure.  The standard workflow is thus::
+
+    rever check
+    rever 1.2.3
+
+If for some reason a release fails partway through, or you want to claw back a
+release that you have made, rever allows you to undo activities. If you find yourself
+in this pickle, you can pass the ``--undo`` option a comma-separated list of
+activities you'd like to undo.  For example::
+
+    rever --undo tag,changelog,authors 1.2.3
+
+Happy releasing!

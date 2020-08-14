@@ -1,0 +1,17 @@
+package:
+  name: test_pin_compatible_in_output
+  version: 1.0
+
+outputs:
+  # templating this makes the matching more challenging.  There have been bugs
+  #    with extracting outputs when templates are used, because the names of outputs
+  #    pre- and post-rendering differ
+  - name: test1_{{ somevar }}
+    requirements:
+      host:
+        - python
+        - numpy
+        - nomkl    # [unix]
+      run:
+        - python
+        - {{ pin_compatible('numpy') }}

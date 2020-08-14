@@ -6,19 +6,41 @@
 
 from __future__ import absolute_import, division, print_function
 
+import argparse
 import logging
 import sys
+from pprint import pprint
 
-from conda_build.conda_interface import ArgumentParser, add_parser_channels
+import yaml
+from yaml.parser import ParserError
 
-from conda_build import __version__
-from conda_build.render import render_recipe, set_language_env_vars, bldpkg_path, output_yaml
-from conda_build.completers import (RecipeCompleter, PythonVersionCompleter, RVersionsCompleter,
-                                    LuaVersionsCompleter, NumPyVersionCompleter)
-from conda_build.config import Config
-from conda_build.utils import silence_loggers
+from conda_build.conda_interface import (ArgumentParser, add_parser_channels,
+                                         cc_conda_build)
+
+from conda_build import __version__, api
+
+from conda_build.config import get_or_merge_config, get_channel_urls
+from conda_build.variants import get_package_variants, set_language_env_vars
+from conda_build.utils import LoggingContext
 
 on_win = (sys.platform == 'win32')
+log = logging.getLogger(__name__)
+
+
+# see: https://stackoverflow.com/questions/29986185/python-argparse-dict-arg
+class ParseYAMLArgument(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        if len(values) != 1:
+            raise RuntimeError("This switch requires exactly one argument")
+
+        try:
+            my_dict = yaml.load(values[0], Loader=yaml.BaseLoader)
+            if not isinstance(my_dict, dict):
+                raise RuntimeError("The argument of {} is not a YAML dictionary.".format(option_string))
+
+            setattr(namespace, self.dest, my_dict)
+        except ParserError as e:
+            raise RuntimeError('The argument of {} is not a valid YAML. The parser error was: \n\n{}'.format(option_string, str(e)))
 
 
 def get_render_parser():
@@ -52,47 +74,82 @@ source to try fill in related template variables.",
     p.add_argument(
         '--python',
         action="append",
-        help="""Set the Python version used by conda build. Can be passed
-        multiple times to build against multiple versions. Can be 'all' to
-    build against all known versions (%r)""" % [i for i in
-    PythonVersionCompleter() if '.' in i],
-        metavar="PYTHON_VER",
-        choices=PythonVersionCompleter(),
+        help="Set the Python version used by conda build.",
     )
     p.add_argument(
         '--perl',
         action="append",
-        help="""Set the Perl version used by conda build. Can be passed
-        multiple times to build against multiple versions.""",
-        metavar="PERL_VER",
+        help="Set the Perl version used by conda build.",
     )
     p.add_argument(
         '--numpy',
         action="append",
-        help="""Set the NumPy version used by conda build. Can be passed
-        multiple times to build against multiple versions. Can be 'all' to
-    build against all known versions (%r)""" % [i for i in
-    NumPyVersionCompleter() if '.' in i],
-        metavar="NUMPY_VER",
-        choices=NumPyVersionCompleter(),
+        help="Set the NumPy version used by conda build.",
     )
     p.add_argument(
         '--R',
         action="append",
-        help="""Set the R version used by conda build. Can be passed
-        multiple times to build against multiple versions.""",
-        metavar="R_VER",
-        choices=RVersionsCompleter(),
+        help="""Set the R version used by conda build.""",
+        dest="r_base"
     )
     p.add_argument(
         '--lua',
         action="append",
-        help="Set the Lua version used by conda build. Can be passed"
-        "multiple times to build against multiple versions (%r)." %
-        [i for i in LuaVersionsCompleter()],
-        metavar="LUA_VER",
-        choices=LuaVersionsCompleter(),
+        help="Set the Lua version used by conda build.",
     )
+    p.add_argument(
+        '--bootstrap',
+        help="""Provide initial configuration in addition to recipe.
+        Can be a path to or name of an environment, which will be emulated
+        in the package.""",
+    )
+    p.add_argument(
+        '--append-file',
+        help="""Append data in meta.yaml with fields from this file.  Jinja2 is not done
+        on appended fields""",
+        dest='append_sections_file',
+    )
+    p.add_argument(
+        '--clobber-file',
+        help="""Clobber data in meta.yaml with fields from this file.  Jinja2 is not done
+        on clobbered fields.""",
+        dest='clobber_sections_file',
+    )
+    p.add_argument(
+        '-m', '--variant-config-files',
+        action="append",
+        help="""Additional variant config files to add.  These yaml files can contain
+        keys such as `c_compiler` and `target_platform` to form a build matrix."""
+    )
+    p.add_argument(
+        '-e', '--exclusive-config-files', '--exclusive-config-file',
+        action="append",
+        help="""Exclusive variant config files to add. Providing files here disables
+        searching in your home directory and in cwd.  The files specified here come at the
+        start of the order, as opposed to the end with --variant-config-files.  Any config
+        files in recipes and any config files specified with --variant-config-files will
+        override values from these files."""
+    )
+    p.add_argument(
+        "--old-build-string", dest="filename_hashing", action="store_false",
+        default=cc_conda_build.get('filename_hashing', 'true').lower() == 'true',
+        help=("Disable hash additions to filenames to distinguish package "
+              "variants from one another. NOTE: any filename collisions are "
+              "yours to handle. Any variants with overlapping names within a "
+              "build will clobber each other.")
+    )
+    p.add_argument(
+        '--use-channeldata',
+        action='store_true',
+        dest='use_channeldata',
+        help=("Use channeldata, if available, to determine run_exports. Otherwise packages "
+              "are downloaded to determine this information")
+    )
+    p.add_argument('--variants',
+                   nargs=1,
+                   action=ParseYAMLArgument,
+                   help=('Variants to extend the build matrix. Must be a valid YAML instance, '
+                         'such as "{python: [3.6, 3.7]}"'))
     add_parser_channels(p)
     return p
 
@@ -108,7 +165,6 @@ def parse_args(args):
     p.add_argument(
         'recipe',
         metavar='RECIPE_PATH',
-        choices=RecipeCompleter(),
         help="Path to recipe directory.",
     )
     # this is here because we have a different default than build
@@ -117,24 +173,55 @@ def parse_args(args):
         action='store_true',
         help='Enable verbose output from download tools and progress updates',
     )
-    args = p.parse_args(args)
+    args, _ = p.parse_known_args(args)
     return p, args
 
 
-def execute(args):
+def execute(args, print_results=True):
     p, args = parse_args(args)
 
-    config = Config()
-    set_language_env_vars(args, p, config)
+    config = get_or_merge_config(None, **args.__dict__)
 
-    metadata, _, _ = render_recipe(args.recipe, no_download_source=args.no_source, config=config)
+    variants = get_package_variants(args.recipe, config, variants=args.variants)
+    set_language_env_vars(variants)
+
+    config.channel_urls = get_channel_urls(args.__dict__)
+
+    config.override_channels = args.override_channels
+
     if args.output:
-        logging.basicConfig(level=logging.ERROR)
-        silence_loggers(show_warnings_and_errors=False)
-        print(bldpkg_path(metadata, config=config))
+        config.verbose = False
+        config.debug = False
+
+    metadata_tuples = api.render(args.recipe, config=config,
+                                 no_download_source=args.no_source,
+                                 variants=args.variants)
+
+    if args.file and len(metadata_tuples) > 1:
+        log.warning("Multiple variants rendered. "
+                    "Only one will be written to the file you specified ({}).".format(args.file))
+
+    if print_results:
+        if args.output:
+            with LoggingContext(logging.CRITICAL + 1):
+                paths = api.get_output_file_paths(metadata_tuples, config=config)
+                print('\n'.join(sorted(paths)))
+            if args.file:
+                m = metadata_tuples[-1][0]
+                api.output_yaml(m, args.file, suppress_outputs=True)
+        else:
+            logging.basicConfig(level=logging.INFO)
+            for (m, _, _) in metadata_tuples:
+                print("--------------")
+                print("Hash contents:")
+                print("--------------")
+                pprint(m.get_hash_contents())
+                print("----------")
+                print("meta.yaml:")
+                print("----------")
+                print(api.output_yaml(m, args.file, suppress_outputs=True))
     else:
-        logging.basicConfig(level=logging.INFO)
-        print(output_yaml(metadata, args.file))
+        return metadata_tuples
 
 
 def main():

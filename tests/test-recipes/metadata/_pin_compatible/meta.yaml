@@ -1,0 +1,9 @@
+package:
+  name: test_pin_compatible_semver
+  version: 1.0
+
+requirements:
+  build:
+    - zlib   1.2.11
+  run:
+    - {{ pin_compatible('zlib') }}

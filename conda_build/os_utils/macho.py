@@ -1,9 +1,14 @@
 from __future__ import absolute_import, division, print_function
 
+import re
+import stat
 import sys
-from subprocess import Popen, check_output, PIPE
-from os.path import islink, isfile
+from subprocess import Popen, check_output, PIPE, STDOUT, CalledProcessError
+import os
+from conda_build.os_utils.pyldd import inspect_rpaths
+from conda_build import utils
 from itertools import islice
+from conda_build.os_utils.external import find_preferably_prefixed_executable
 
 NO_EXT = (
     '.py', '.pyc', '.pyo', '.h', '.a', '.c', '.txt', '.html',
@@ -34,20 +39,27 @@ FILETYPE = {
 
 
 def is_macho(path):
-    if path.endswith(NO_EXT) or islink(path) or not isfile(path):
+    if path.endswith(NO_EXT) or os.path.islink(path) or not os.path.isfile(path):
         return False
     with open(path, 'rb') as fi:
         head = fi.read(4)
     return bool(head in MAGIC)
 
 
-def is_dylib(path):
+def is_dylib(path, build_prefix):
     return human_filetype(path) == 'DYLIB'
 
 
-def human_filetype(path):
-    lines = check_output(['otool', '-h', path]).decode('utf-8').splitlines()
-    assert lines[0].startswith(path), path
+def human_filetype(path, build_prefix):
+    otool = find_apple_cctools_executable('otool', build_prefix)
+    output = check_output((otool, '-h', path)).decode('utf-8')
+    lines = output.splitlines()
+    if not lines[0].startswith((path, 'Mach header')):
+        raise ValueError(
+            'Expected `otool -h` output to start with'
+            ' Mach header or {0}, got:\n{1}'.format(path, output)
+        )
+    assert lines[0].startswith((path, 'Mach header')), path
 
     for line in lines:
         if line.strip().startswith('0x'):
@@ -134,7 +146,34 @@ def _get_matching_load_commands(lines, cb_filter):
     return result
 
 
-def otool(path, cb_filter=is_dylib_info):
+def find_apple_cctools_executable(name, build_prefix, nofail=False):
+    tools = find_preferably_prefixed_executable(name, build_prefix, all_matches=True)
+    for tool in tools:
+        try:
+            if '/usr/bin' in tool:
+                with open(tool, 'rb') as f:
+                    s = f.read()
+                if s.find(b'usr/lib/libxcselect.dylib') != -1:
+                    # We ask xcrun.
+                    try:
+                        tool_xcr = check_output(['xcrun', '-find', name], stderr=STDOUT).decode('utf-8').splitlines()[0]
+                    except Exception as e:
+                        log = utils.get_logger(__name__)
+                        log.error("ERROR :: Found `{}` but is is an Apple Xcode stub executable\n"
+                                  "and it returned an error:\n{}".format(tool, e.output))
+                        raise e
+                    tool = tool_xcr
+                    if os.path.exists(tool):
+                        return tool
+        except Exception as _:  # noqa
+            print("ERROR :: Failed to run `{}`.  Please use `conda` to install `cctools` into your base environment.\n"
+                  "         An option on macOS is to install `Xcode` or `Command Line Tools for Xcode`."
+                  .format(tool))
+            sys.exit(1)
+        return tool
+
+
+def otool(path, build_prefix=None, cb_filter=is_dylib_info):
     """A wrapper around otool -l
 
     Parse the output of the otool -l 'load commands', filtered by
@@ -151,19 +190,28 @@ def otool(path, cb_filter=is_dylib_info):
     Any key values that can be converted to integers are converted
     to integers, the rest are strings.
     """
-    lines = check_output(['otool', '-l', path]).decode('utf-8').splitlines()
-    return _get_matching_load_commands(lines, cb_filter)
+    otool = find_apple_cctools_executable('otool', build_prefix)
+    lines = check_output([otool, '-l', path],
+                          stderr=STDOUT).decode('utf-8')
+    # llvm-objdump returns 0 for some things that are anything but successful completion.
+    lines_split = lines.splitlines()
+    # 'invalid', 'expected' and 'unexpected' are too generic
+    # here so also check that we do not get 'useful' output.
+    if len(lines_split) < 10 and (re.match('.*(is not a Mach-O|invalid|expected|unexpected).*',
+                                           lines, re.MULTILINE)):
+        raise CalledProcessError(-1, otool)
+    return _get_matching_load_commands(lines_split, cb_filter)
 
 
-def get_dylibs(path):
+def get_dylibs(path, build_prefix=None):
     """Return a list of the loaded dylib pathnames"""
-    dylib_loads = otool(path, is_load_dylib)
+    dylib_loads = otool(path, build_prefix, is_load_dylib)
     return [dylib_load['name'] for dylib_load in dylib_loads]
 
 
-def get_id(path):
+def get_id(path, build_prefix=None):
     """Returns the id name of the Mach-O file `path` or an empty string"""
-    dylib_loads = otool(path, is_id_dylib)
+    dylib_loads = otool(path, build_prefix, is_id_dylib)
     try:
         return [dylib_load['name'] for dylib_load in dylib_loads][0]
     except:
@@ -172,18 +220,40 @@ def get_id(path):
 
 def get_rpaths(path):
     """Return a list of the dylib rpaths"""
-    rpaths = otool(path, is_rpath)
-    return [rpath['path'] for rpath in rpaths]
+    res_pyldd = inspect_rpaths(path, resolve_dirnames=False, use_os_varnames=True)
+    return res_pyldd
 
 
-def add_rpath(path, rpath, verbose=False):
-    """Add an `rpath` to the Mach-O file at `path`"""
-    args = ['install_name_tool', '-add_rpath', rpath, path]
+def _chmod(filename, mode):
+    try:
+        os.chmod(filename, mode)
+    except (OSError, utils.PermissionError) as e:
+        log = utils.get_logger(__name__)
+        log.warn(str(e))
+
+
+def install_name_tool(args, build_prefix=None, verbose=False):
+    args_full = [find_apple_cctools_executable('install_name_tool', build_prefix)]
+    args_full.extend(args)
     if verbose:
-        print(' '.join(args))
-    p = Popen(args, stderr=PIPE)
-    stdout, stderr = p.communicate()
-    stderr = stderr.decode('utf-8')
+        print(' '.join(args_full))
+    old_mode = stat.S_IMODE(os.stat(args[-1]).st_mode)
+    new_mode = old_mode | stat.S_IWUSR
+    if old_mode != new_mode:
+        _chmod(args[-1], new_mode)
+    subproc = Popen(args_full, stdout=PIPE, stderr=PIPE)
+    out, err = subproc.communicate()
+    out = out.decode('utf-8')
+    err = err.decode('utf-8')
+    if old_mode != new_mode:
+        _chmod(args[-1], old_mode)
+    return subproc.returncode, out, err
+
+
+def add_rpath(path, rpath, build_prefix=None, verbose=False):
+    """Add an `rpath` to the Mach-O file at `path`"""
+    args = ['-add_rpath', rpath, path]
+    code, _, stderr = install_name_tool(args, build_prefix)
     if "Mach-O dynamic shared library stub file" in stderr:
         print("Skipping Mach-O dynamic shared library stub file %s\n" % path)
         return
@@ -192,19 +262,15 @@ def add_rpath(path, rpath, verbose=False):
         return
     else:
         print(stderr, file=sys.stderr)
-        if p.returncode:
+        if code:
             raise RuntimeError("install_name_tool failed with exit status %d"
-        % p.returncode)
+        % code)
 
 
 def delete_rpath(path, rpath, verbose=False):
     """Delete an `rpath` from the Mach-O file at `path`"""
-    args = ['install_name_tool', '-delete_rpath', rpath, path]
-    if verbose:
-        print(' '.join(args))
-    p = Popen(args, stderr=PIPE)
-    _, stderr = p.communicate()
-    stderr = stderr.decode('utf-8')
+    args = ['-delete_rpath', rpath, path]
+    code, _, stderr = install_name_tool(args)
     if "Mach-O dynamic shared library stub file" in stderr:
         print("Skipping Mach-O dynamic shared library stub file %s\n" % path)
         return
@@ -213,12 +279,12 @@ def delete_rpath(path, rpath, verbose=False):
         return
     else:
         print(stderr, file=sys.stderr)
-        if p.returncode:
+        if code:
             raise RuntimeError("install_name_tool failed with exit status %d"
-        % p.returncode)
+        % code)
 
 
-def install_name_change(path, cb_func, verbose=False):
+def install_name_change(path, build_prefix, cb_func, dylibs, verbose=False):
     """Change dynamic shared library load name or id name of Mach-O Binary `path`.
 
     `cb_func` is called for each shared library load command. The dictionary of
@@ -228,7 +294,7 @@ def install_name_change(path, cb_func, verbose=False):
     When dealing with id load commands, `install_name_tool -id` is used.
     When dealing with dylib load commands `install_name_tool -change` is used.
     """
-    dylibs = otool(path)
+
     changes = []
     for index, dylib in enumerate(dylibs):
         new_name = cb_func(path, dylib)
@@ -237,25 +303,21 @@ def install_name_change(path, cb_func, verbose=False):
 
     ret = True
     for index, new_name in changes:
-        args = ['install_name_tool']
+        args = []
         if dylibs[index]['cmd'] == 'LC_ID_DYLIB':
             args.extend(('-id', new_name, path))
         else:
             args.extend(('-change', dylibs[index]['name'], new_name, path))
-        if verbose:
-            print(' '.join(args))
-        p = Popen(args, stderr=PIPE)
-        _, stderr = p.communicate()
-        stderr = stderr.decode('utf-8')
+        code, _, stderr = install_name_tool(args, build_prefix)
         if "Mach-O dynamic shared library stub file" in stderr:
             print("Skipping Mach-O dynamic shared library stub file %s" % path)
             ret = False
             continue
         else:
             print(stderr, file=sys.stderr)
-        if p.returncode:
-            raise RuntimeError("install_name_tool failed with exit status %d"
-                % p.returncode)
+        if code:
+            raise RuntimeError("install_name_tool failed with exit status %d, stderr of:\n%s"
+                % (code, stderr))
     return ret
 
 

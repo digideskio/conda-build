@@ -3,16 +3,15 @@ package:
   version: {{ load_setup_py_data().version }}
 
 source:
-  git_url: https://github.com/NCAR/load_setup_py_test
-
-build:
-  number: 1
-  detect_binary_files_with_prefix: true
+  path: .
 
 requirements:
-  build:
-    - numpy x.x
+  host:
+    - cython
+    - numpy
+    - nomkl    # [unix]
     - python
+    - setuptools
   run:
     - numpy x.x
     - python

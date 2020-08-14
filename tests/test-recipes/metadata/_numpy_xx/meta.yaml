@@ -1,0 +1,13 @@
+package:
+  name: conda-build-test-numpy-build-run
+  version: 1.0
+
+requirements:
+  build:
+    - python
+    # legacy "pin run as build"
+    - numpy x.x
+    - nomkl    # [unix]
+  run:
+    - python
+    - numpy x.x
